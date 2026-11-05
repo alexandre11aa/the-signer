@@ -1,0 +1,5 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+pyhanko==0.38.1
+pypdf==6.21.4
+pillow==13.0.0

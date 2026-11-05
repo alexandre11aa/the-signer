@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>O Assinador</title>
+  <link rel="icon" type="image/png" href="/static/img/o_assinador.png">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/static/img/o_assinador.png" alt="" width="28" height="28">
+      <span>O Assinador</span>
+    </div>
+    <p class="privacy">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      Processado em memória. Nada é armazenado.
+    </p>
+  </header>
+
+  <main class="layout">
+    <!-- Settings panel (left on desktop) -->
+    <form class="panel" id="sign-form" autocomplete="off">
+      <div class="panel-body">
+        <h1>Assinar documento</h1>
+
+        <div class="field">
+          <span class="label">Documento</span>
+          <label class="file-row" for="pdf-file">
+            <span class="file-name" id="pdf-name">Escolher PDF…</span>
+            <span class="file-action">Procurar</span>
+          </label>
+          <input type="file" id="pdf-file" accept="application/pdf,.pdf" required class="visually-hidden">
+        </div>
+
+        <div class="field">
+          <span class="label">Certificado (.pfx / .p12)</span>
+          <label class="file-row" for="pfx-file">
+            <span class="file-name" id="pfx-name">Escolher certificado…</span>
+            <span class="file-action">Procurar</span>
+          </label>
+          <input type="file" id="pfx-file" accept=".pfx,.p12" required class="visually-hidden">
+        </div>
+
+        <div class="field">
+          <label class="label" for="password">Senha do certificado</label>
+          <div class="password-row">
+            <input type="password" id="password" autocomplete="off" required>
+            <button type="button" class="ghost" id="toggle-password" aria-label="Mostrar senha" aria-pressed="false">Mostrar</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">Páginas</span>
+          <div class="segmented" role="radiogroup" aria-label="Páginas a assinar">
+            <label><input type="radio" name="pages-mode" value="all" checked><span>Todas</span></label>
+            <label><input type="radio" name="pages-mode" value="custom"><span>Personalizado</span></label>
+          </div>
+          <input type="text" id="pages" placeholder="ex: 1,3,5-8" hidden aria-label="Páginas personalizadas">
+        </div>
+
+        <div class="field field-center">
+          <span class="label">Posição na página</span>
+          <div class="position-grid" id="position-grid" role="radiogroup" aria-label="Posição da assinatura"></div>
+        </div>
+
+        <div class="field">
+          <span class="label">Estilo</span>
+          <div class="segmented" role="radiogroup" aria-label="Estilo da assinatura">
+            <label><input type="radio" name="style" value="default" checked><span>Padrão</span></label>
+            <label><input type="radio" name="style" value="adobe"><span>Adobe</span></label>
+            <label><input type="radio" name="style" value="custom"><span>Personalizado</span></label>
+          </div>
+          <div id="logo-field" hidden>
+            <label class="file-row" for="logo-file">
+              <span class="file-name" id="logo-name">Imagem PNG 264×264…</span>
+              <span class="file-action">Procurar</span>
+            </label>
+            <input type="file" id="logo-file" accept="image/png,.png" class="visually-hidden">
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="primary" id="submit-button">Assinar</button>
+        <div class="result-actions" id="result-actions" hidden>
+          <button type="button" class="primary" id="download-button">Baixar PDF</button>
+          <button type="button" class="secondary" id="restart-button">Novo PDF</button>
+        </div>
+      </div>
+    </form>
+
+    <!-- Preview (right on desktop, on top on mobile) -->
+    <section class="preview" aria-label="Pré-visualização">
+      <div class="stage" id="stage">
+        <label class="dropzone" id="dropzone" for="pdf-file">
+          <svg viewBox="0 0 24 24" width="40" height="40" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M12 18v-6m0 0-2.500 2.500M12 12l2.500 2.500" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <strong>Arraste um PDF aqui</strong>
+          <span>ou clique para escolher um arquivo</span>
+        </label>
+
+        <div class="page-wrap" id="page-wrap" hidden>
+          <canvas id="page-canvas"></canvas>
+          <div class="stamp" id="stamp" hidden></div>
+        </div>
+      </div>
+
+      <div class="pager" id="pager" hidden>
+        <button type="button" class="icon-button" id="prev-page" aria-label="Página anterior">‹</button>
+        <span id="page-indicator">1 / 1</span>
+        <button type="button" class="icon-button" id="next-page" aria-label="Próxima página">›</button>
+        <span class="page-state" id="page-state"></span>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast-region" id="toast-region"></div>
+
+  <script src="/static/js/vendor/pdf.min.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
