@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from secrets import token_hex
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from PIL import Image
 from pyhanko.pdf_utils import layout
 from pyhanko.pdf_utils.font.basic import SimpleFontEngineFactory
@@ -12,6 +15,7 @@ from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.layout import BoxConstraints
 from pyhanko.pdf_utils.text import TextBox, TextBoxStyle
 from pyhanko.sign import fields, signers
+from pyhanko_certvalidator.util import get_pyca_cryptography_hash, process_pss_params
 from pyhanko.stamp import TextStamp, TextStampStyle
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pypdf import PdfReader, PdfWriter
@@ -83,10 +87,34 @@ def adobe_date(tz_offset_minutes: int = 0) -> str:
     return now.strftime("%Y.%m.%d %H:%M:%S ") + f"{offset[:3]}'{offset[3:]}'"
 
 
+class CachedKeySigner(signers.SimpleSigner):
+    """pyHanko re-parses (and re-validates) the private key on every sign_raw call, twice per
+    signature. With one signature per page that dominates the run time on slow CPUs, so the
+    parsed key is kept for the lifetime of this signer. RSA only; anything else falls back."""
+
+    _parsed_key = None
+
+    def sign_raw(self, data: bytes, digest_algorithm: str) -> bytes:
+        if self._parsed_key is None:
+            self._parsed_key = serialization.load_der_private_key(
+                self.signing_key.dump(), password=None)
+        key = self._parsed_key
+        if not isinstance(key, RSAPrivateKey):
+            return super().sign_raw(data, digest_algorithm)
+        mechanism = self.get_signature_mechanism_for_digest(digest_algorithm)
+        hash_algo = get_pyca_cryptography_hash(digest_algorithm)
+        if mechanism.signature_algo == "rsassa_pss":
+            padding, hash_algo = process_pss_params(mechanism["parameters"])
+            return key.sign(data, padding, hash_algo)
+        return key.sign(data, PKCS1v15(), hash_algo)
+
+
 def load_signer(pfx_bytes: bytes, password: str) -> signers.SimpleSigner:
     try:
-        return signers.SimpleSigner.load_pkcs12_data(
+        signer = signers.SimpleSigner.load_pkcs12_data(
             pfx_bytes, other_certs=None, passphrase=password.encode("utf-8"))
+        signer.__class__ = CachedKeySigner
+        return signer
     except Exception:
         # Never echo the underlying error: it may carry details of the key material.
         raise UserInputError("invalid_certificate_or_password")
@@ -180,8 +208,9 @@ def normalize_hybrid_xref(pdf_bytes: bytes) -> bytes:
 
 def sign_pdf(pdf_bytes: bytes, pfx_bytes: bytes, password: str,
              pages: str, position: int, style: str, logo: bytes | None = None,
-             tz_offset_minutes: int = 0) -> bytes:
-    """One visible signature per selected page, as chained incremental updates."""
+             tz_offset_minutes: int = 0, progress=None) -> bytes:
+    """One visible signature per selected page, as chained incremental updates.
+    `progress(done, total)` is called from this thread before the first page and after each one."""
     total, encrypted = count_pages(pdf_bytes)
     if encrypted:
         raise UserInputError("encrypted_pdf")
@@ -200,8 +229,11 @@ def sign_pdf(pdf_bytes: bytes, pfx_bytes: bytes, password: str,
     pdf_bytes = normalize_hybrid_xref(pdf_bytes)
     reader = PdfReader(io.BytesIO(pdf_bytes))
     current = io.BytesIO(pdf_bytes)
+    total_to_sign = len(page_indexes)
+    if progress:
+        progress(0, total_to_sign)
     try:
-        for index in page_indexes:
+        for done, index in enumerate(page_indexes, start=1):
             field_name = f"Signature_p{index + 1}_{token_hex(4)}"
             box = signature_box(reader.pages[index], position, width, height)
             writer = IncrementalPdfFileWriter(current)
@@ -212,6 +244,8 @@ def sign_pdf(pdf_bytes: bytes, pfx_bytes: bytes, password: str,
             output = io.BytesIO()
             pdf_signer.sign_pdf(writer, output=output, appearance_text_params=params)
             current = output
+            if progress:
+                progress(done, total_to_sign)
     except UserInputError:
         raise
     except Exception:

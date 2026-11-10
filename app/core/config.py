@@ -11,7 +11,7 @@ MAX_BODY_BYTES = 40 * 1024 * 1024   # whole request body
 MAX_PDF_BYTES = 25 * 1024 * 1024    # decoded PDF
 MAX_PFX_BYTES = 256 * 1024          # decoded certificate
 MAX_PAGES_TO_SIGN = 100
-SIGN_TIMEOUT_SECONDS = 60
+SIGN_TIMEOUT_SECONDS = 240   # Render free tier has a very slow shared CPU
 
 # Signature box geometry (PDF points).
 STAMP_WIDTH, STAMP_HEIGHT, STAMP_MARGIN = 210, 60, 20

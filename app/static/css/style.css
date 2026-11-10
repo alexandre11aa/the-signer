@@ -230,3 +230,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .toast.error { border-left-color: #ff6b81; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ---------- signing progress (over the page preview) ---------- */
+.progress-overlay { position: absolute; inset: 0; display: grid; place-items: center; line-height: 1.4;
+  background: #ffffffb8; backdrop-filter: blur(2px); z-index: 5; }
+.progress-overlay[hidden] { display: none; }
+.progress-card { width: min(80%, 320px); display: grid; gap: 10px; text-align: center; padding: 18px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 4px 20px #00000026; color: var(--text); }
+.progress-track { height: 10px; border-radius: 999px; background: var(--surface-muted); overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--border); }
+.progress-fill { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .25s ease; }
+#progress-percent { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .progress-fill { transition: none; } }

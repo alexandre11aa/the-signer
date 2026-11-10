@@ -2,12 +2,13 @@
 import asyncio
 import base64
 import binascii
+import json
 import logging
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -21,6 +22,9 @@ logging.getLogger("uvicorn.access").disabled = True
 
 # No docs/openapi endpoints exposed.
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+_running: set[asyncio.Task] = set()
 
 
 # ---------- request models ----------
@@ -131,16 +135,42 @@ async def sign(request: Request):
         if not payload.logo_b64:
             raise UserInputError("invalid_logo")
         logo = decode_b64(payload.logo_b64, config.MAX_LOGO_BYTES)
-    try:
-        signed = await asyncio.wait_for(
-            run_in_threadpool(sign_pdf, pdf, pfx, payload.password,
-                              payload.pages, payload.position, payload.style, logo,
-                              payload.tz_offset_minutes),
-            timeout=config.SIGN_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
-        raise UserInputError("timeout")
-    return Response(signed, media_type="application/pdf",
-                    headers={"Content-Disposition": 'attachment; filename="signed.pdf"'})
+    # The answer is a stream of JSON lines: {"done":n,"total":m} after each signed page, then
+    # one last line, either {"pdf":"<base64>"} or {"error":"<code>"}.
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def report(done: int, total: int) -> None:       # called from the worker thread
+        loop.call_soon_threadsafe(queue.put_nowait, {"done": done, "total": total})
+
+    async def run() -> None:
+        try:
+            signed = await asyncio.wait_for(
+                run_in_threadpool(sign_pdf, pdf, pfx, payload.password,
+                                  payload.pages, payload.position, payload.style, logo,
+                                  payload.tz_offset_minutes, report),
+                timeout=config.SIGN_TIMEOUT_SECONDS)
+            item = {"pdf": base64.b64encode(signed).decode("ascii")}
+        except asyncio.TimeoutError:
+            item = {"error": "timeout"}
+        except UserInputError as exc:
+            item = {"error": exc.code}
+        except Exception:
+            item = {"error": "internal_error"}
+        await queue.put(item)
+
+    async def stream():
+        task = asyncio.create_task(run())
+        _running.add(task)                            # the loop only keeps weak references
+        task.add_done_callback(_running.discard)
+        while True:
+            item = await queue.get()
+            yield json.dumps(item).encode("ascii") + b"\n"
+            if "pdf" in item or "error" in item:
+                break
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"X-Accel-Buffering": "no"})
 
 
 # Frontend is served from the same origin, so no CORS is needed.

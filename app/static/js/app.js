@@ -132,6 +132,69 @@ async function postJson(url, body) {
   return response;
 }
 
+// ---------- signing with live progress ----------
+const progressBox = $("progress");
+const progressLabel = $("progress-label");
+const progressFill = $("progress-fill");
+const progressPercent = $("progress-percent");
+
+function showProgress(done, total) {
+  progressBox.hidden = false;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  progressFill.style.width = `${percent}%`;
+  progressPercent.textContent = `${percent}%`;
+  progressLabel.textContent = total
+    ? (done >= total ? "Finalizando…" : `Assinando página ${done + 1} de ${total}`)
+    : "Preparando…";
+}
+
+function hideProgress() { progressBox.hidden = true; }
+
+function base64ToBlob(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
+function errorFor(code) {
+  return Object.assign(new Error("request_failed"), {
+    userMessage: code === "invalid_certificate_or_password" ? MESSAGES.invalidCertificate
+      : code === "invalid_logo" ? MESSAGES.logo : MESSAGES.generic,
+  });
+}
+
+// The server answers with JSON lines: progress updates, then {pdf} or {error}.
+async function signWithProgress(body) {
+  showProgress(0, 0);
+  const response = await postJson("/api/sign", body);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const handle = (line) => {
+    if (!line.trim()) return null;
+    const message = JSON.parse(line);
+    if (message.error) throw errorFor(message.error);
+    if (message.pdf) return base64ToBlob(message.pdf);
+    showProgress(message.done, message.total);
+    return null;
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const blob = handle(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      if (blob) return blob;
+    }
+    if (done) break;
+  }
+  const blob = handle(buffer);
+  if (blob) return blob;
+  throw errorFor("");
+}
+
 // ---------- position grid ----------
 function buildPositionGrid() {
   const grid = $("position-grid");
@@ -392,13 +455,13 @@ form.addEventListener("submit", async (event) => {
       tz_offset_minutes: -new Date().getTimezoneOffset(),
     };
     if (body.style === "custom") body.logo_b64 = await fileToBase64(logoInput.files[0]);
-    const response = await postJson("/api/sign", body);
-    signedBlob = await response.blob();
+    signedBlob = await signWithProgress(body);
     signedName = pdfInput.files[0].name.replace(/\.pdf$/i, "") + "_signed.pdf";
     showResult();
   } catch (error) {
     showToast(error.userMessage || MESSAGES.generic, "error");
   } finally {
+    hideProgress();
     passwordInput.value = ""; // do not keep the password in the DOM
     submitButton.textContent = "Assinar";
     submitButton.classList.remove("loading");
