@@ -1,7 +1,7 @@
 """PDF signing logic. Works exclusively on in-memory bytes: nothing touches the disk."""
 import io
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from secrets import token_hex
 
 from PIL import Image
@@ -76,8 +76,9 @@ def wrap_text(text: str, max_chars: int = 16) -> str:
     return "\n".join(lines)
 
 
-def adobe_date() -> str:
-    now = datetime.now().astimezone()
+def adobe_date(tz_offset_minutes: int = 0) -> str:
+    """Current time in the client's timezone, formatted like Adobe (2024.01.31 08:31:48 -03'00')."""
+    now = datetime.now(timezone(timedelta(minutes=tz_offset_minutes)))
     offset = now.strftime("%z")
     return now.strftime("%Y.%m.%d %H:%M:%S ") + f"{offset[:3]}'{offset[3:]}'"
 
@@ -116,7 +117,8 @@ def load_custom_logo(data: bytes) -> Image.Image:
         raise UserInputError("invalid_logo")
 
 
-def _build_style(style: str, signer_name: str, custom_logo: Image.Image | None = None):
+def _build_style(style: str, signer_name: str, custom_logo: Image.Image | None = None,
+                tz_offset_minutes: int = 0):
     if style in ("adobe", "custom"):
         # "custom" uses the Adobe layout; only the symbol image changes.
         symbol = custom_logo if custom_logo is not None else Image.open(ADOBE_LOGO_PATH).convert("RGBA")
@@ -139,7 +141,7 @@ def _build_style(style: str, signer_name: str, custom_logo: Image.Image | None =
             "wrapped_name": wrap_text(signer_name),
             "details": ("Assinado de forma digital\n"
                         + wrap_text(f"por {signer_name}", 22)
-                        + f"\nDados: {adobe_date()}"),
+                        + f"\nDados: {adobe_date(tz_offset_minutes)}"),
         }
         return stamp_style, params, (ADOBE_WIDTH, ADOBE_HEIGHT)
 
@@ -149,7 +151,9 @@ def _build_style(style: str, signer_name: str, custom_logo: Image.Image | None =
         border_width=0,
         background_opacity=0,
     )
-    return stamp_style, None, (STAMP_WIDTH, STAMP_HEIGHT)
+    # Default style: pyHanko would render the time in the server's timezone, so pass our own.
+    params = {"signer": signer_name, "ts": adobe_date(tz_offset_minutes)}
+    return stamp_style, params, (STAMP_WIDTH, STAMP_HEIGHT)
 
 
 def normalize_hybrid_xref(pdf_bytes: bytes) -> bytes:
@@ -175,7 +179,8 @@ def normalize_hybrid_xref(pdf_bytes: bytes) -> bytes:
 
 
 def sign_pdf(pdf_bytes: bytes, pfx_bytes: bytes, password: str,
-             pages: str, position: int, style: str, logo: bytes | None = None) -> bytes:
+             pages: str, position: int, style: str, logo: bytes | None = None,
+             tz_offset_minutes: int = 0) -> bytes:
     """One visible signature per selected page, as chained incremental updates."""
     total, encrypted = count_pages(pdf_bytes)
     if encrypted:
@@ -189,7 +194,8 @@ def sign_pdf(pdf_bytes: bytes, pfx_bytes: bytes, password: str,
         if not logo:
             raise UserInputError("invalid_logo")
         custom_logo = load_custom_logo(logo)
-    stamp_style, params, (width, height) = _build_style(style, signer_name, custom_logo)
+    stamp_style, params, (width, height) = _build_style(
+        style, signer_name, custom_logo, tz_offset_minutes)
 
     pdf_bytes = normalize_hybrid_xref(pdf_bytes)
     reader = PdfReader(io.BytesIO(pdf_bytes))

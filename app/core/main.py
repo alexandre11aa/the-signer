@@ -32,6 +32,7 @@ class SignRequest(BaseModel):
     position: int = Field(ge=1, le=9)         # 3x3 grid, 1 = top-left, 9 = bottom-right
     style: str                                # "default" | "adobe" | "custom"
     logo_b64: str | None = None               # PNG 264x264, only for style "custom"
+    tz_offset_minutes: int = Field(default=0, ge=-840, le=840)  # client's offset from UTC
 
 
 # ---------- helpers ----------
@@ -133,7 +134,8 @@ async def sign(request: Request):
     try:
         signed = await asyncio.wait_for(
             run_in_threadpool(sign_pdf, pdf, pfx, payload.password,
-                              payload.pages, payload.position, payload.style, logo),
+                              payload.pages, payload.position, payload.style, logo,
+                              payload.tz_offset_minutes),
             timeout=config.SIGN_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         raise UserInputError("timeout")

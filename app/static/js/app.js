@@ -388,6 +388,8 @@ form.addEventListener("submit", async (event) => {
       pages: pagesText(),
       position: Number(form.elements.position.value),
       style: form.elements.style.value,
+      // Minutes east of UTC (e.g. -180 for UTC-03:00), so the stamp shows the user's local time.
+      tz_offset_minutes: -new Date().getTimezoneOffset(),
     };
     if (body.style === "custom") body.logo_b64 = await fileToBase64(logoInput.files[0]);
     const response = await postJson("/api/sign", body);
